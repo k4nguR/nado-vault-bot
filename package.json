@@ -1,0 +1,15 @@
+{
+  "name": "nado-vault-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot that monitors Nado NLP vault cap changes on Ink chain",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node src/check.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.4",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
