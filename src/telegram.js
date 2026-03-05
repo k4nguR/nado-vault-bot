@@ -13,7 +13,6 @@ function init() {
 
 /**
  * Send a text message to the configured chat.
- * Uses MarkdownV2 for rich formatting.
  */
 async function sendMessage(text) {
     if (!bot) init();
@@ -29,71 +28,40 @@ async function sendMessage(text) {
 }
 
 /**
- * Format a number with commas and 2 decimal places.
- */
-function fmt(numStr) {
-    const n = parseFloat(numStr);
-    return n.toLocaleString("en-US", {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-    });
-}
-
-/**
- * Send the startup notification with current vault status.
+ * Send the startup notification showing current pool state.
  */
 async function sendStartupNotification(data) {
     const lines = [
-        `🚀 <b>Nado Vault Monitor Started</b>`,
+        `🚀 <b>Nado Pool Cap Monitor Started</b>`,
         ``,
-        `📊 <b>Current Vault Status</b>`,
-        `├ Total TVL: <code>${fmt(data.tvl.totalBalance)} ${data.tvl.symbol}</code>`,
-        `├ Clearinghouse: <code>${fmt(data.tvl.clearinghouseBalance)} ${data.tvl.symbol}</code>`,
-        `├ Endpoint: <code>${fmt(data.tvl.endpointBalance)} ${data.tvl.symbol}</code>`,
-        `├ Insurance: <code>${fmt(data.insurance)}</code>`,
-        `└ NLP Pools: <code>${data.pools.length}</code>`,
+        `👁 Watching <b>Pool #${data.targetPool.poolId}</b> for cap increases`,
+        `├ Current weight: <code>${data.targetPool.balanceWeightX18}</code>`,
+        `├ Owner: <code>${data.targetPool.owner.slice(0, 10)}…</code>`,
+        `└ Total pools: <code>${data.totalPools}</code>`,
+        ``,
+        `⛓ Block: <code>${data.blockNumber}</code>`,
+        `🕐 ${data.timestamp}`,
     ];
-
-    if (data.pools.length > 0) {
-        lines.push(``);
-        lines.push(`🏦 <b>NLP Pools</b>`);
-        data.pools.forEach((pool, i) => {
-            const prefix = i === data.pools.length - 1 ? "└" : "├";
-            lines.push(
-                `${prefix} Pool #${pool.poolId}: weight <code>${pool.balanceWeightX18}</code> | owner <code>${pool.owner.slice(0, 8)}…</code>`
-            );
-        });
-    }
-
-    lines.push(``);
-    lines.push(`⛓ Block: <code>${data.blockNumber}</code>`);
-    lines.push(`🕐 ${data.timestamp}`);
 
     await sendMessage(lines.join("\n"));
 }
 
 /**
- * Send a change notification.
+ * Send a notification when the pool cap increases.
  */
-async function sendChangeNotification(changes, newData) {
+async function sendCapIncreaseNotification(capChange, data) {
     const lines = [
-        `🔔 <b>Nado Vault Change Detected!</b>`,
+        `🚨🚨🚨 <b>POOL CAP INCREASED!</b> 🚨🚨🚨`,
         ``,
+        `💰 <b>Pool #${capChange.poolId} deposits may be available!</b>`,
+        ``,
+        `⚖️ Weight: <code>${capChange.oldWeight}</code> → <code>${capChange.newWeight}</code>`,
+        ``,
+        `🔗 <a href="https://app.nado.xyz/vault">Open Nado Vault →</a>`,
+        ``,
+        `⛓ Block: <code>${data.blockNumber}</code>`,
+        `🕐 ${data.timestamp}`,
     ];
-
-    for (const change of changes) {
-        lines.push(`${change}`);
-    }
-
-    lines.push(``);
-    lines.push(`📊 <b>Updated Status</b>`);
-    lines.push(`├ Total TVL: <code>${fmt(newData.tvl.totalBalance)} ${newData.tvl.symbol}</code>`);
-    lines.push(`├ Clearinghouse: <code>${fmt(newData.tvl.clearinghouseBalance)} ${newData.tvl.symbol}</code>`);
-    lines.push(`├ Endpoint: <code>${fmt(newData.tvl.endpointBalance)} ${newData.tvl.symbol}</code>`);
-    lines.push(`└ NLP Pools: <code>${newData.pools.length}</code>`);
-    lines.push(``);
-    lines.push(`⛓ Block: <code>${newData.blockNumber}</code>`);
-    lines.push(`🕐 ${newData.timestamp}`);
 
     await sendMessage(lines.join("\n"));
 }
@@ -102,6 +70,5 @@ module.exports = {
     init,
     sendMessage,
     sendStartupNotification,
-    sendChangeNotification,
-    fmt,
+    sendCapIncreaseNotification,
 };

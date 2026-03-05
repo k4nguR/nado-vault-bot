@@ -35,83 +35,22 @@ function saveState(data) {
 }
 
 /**
- * Compare two vault snapshots and return a list of change descriptions.
+ * Check if the target pool's cap (balanceWeightX18) has increased.
+ * Returns a description string if it increased, null otherwise.
  */
-function detectChanges(oldData, newData) {
-    const changes = [];
-    const threshold = config.changeThresholdUsd;
+function detectCapIncrease(oldData, newData) {
+    const oldWeight = parseFloat(oldData.targetPool.balanceWeightX18);
+    const newWeight = parseFloat(newData.targetPool.balanceWeightX18);
 
-    // TVL change
-    const oldTvl = parseFloat(oldData.tvl.totalBalance);
-    const newTvl = parseFloat(newData.tvl.totalBalance);
-    const tvlDiff = newTvl - oldTvl;
-
-    if (Math.abs(tvlDiff) >= threshold) {
-        const arrow = tvlDiff > 0 ? "📈" : "📉";
-        const sign = tvlDiff > 0 ? "+" : "";
-        changes.push(
-            `${arrow} <b>TVL changed:</b> ${telegram.fmt(oldData.tvl.totalBalance)} → ${telegram.fmt(newData.tvl.totalBalance)} ${newData.tvl.symbol} (<code>${sign}${telegram.fmt(tvlDiff.toString())}</code>)`
-        );
+    if (newWeight > oldWeight) {
+        return {
+            oldWeight: oldData.targetPool.balanceWeightX18,
+            newWeight: newData.targetPool.balanceWeightX18,
+            poolId: newData.targetPool.poolId,
+        };
     }
 
-    // Clearinghouse balance change
-    const oldCh = parseFloat(oldData.tvl.clearinghouseBalance);
-    const newCh = parseFloat(newData.tvl.clearinghouseBalance);
-    const chDiff = newCh - oldCh;
-
-    if (Math.abs(chDiff) >= threshold) {
-        const arrow = chDiff > 0 ? "📈" : "📉";
-        const sign = chDiff > 0 ? "+" : "";
-        changes.push(
-            `${arrow} <b>Clearinghouse:</b> ${telegram.fmt(oldData.tvl.clearinghouseBalance)} → ${telegram.fmt(newData.tvl.clearinghouseBalance)} (<code>${sign}${telegram.fmt(chDiff.toString())}</code>)`
-        );
-    }
-
-    // Pool count change
-    if (oldData.pools.length !== newData.pools.length) {
-        changes.push(
-            `🏦 <b>NLP Pool count changed:</b> ${oldData.pools.length} → ${newData.pools.length}`
-        );
-    }
-
-    // Pool weight changes
-    const oldPoolMap = {};
-    oldData.pools.forEach((p) => (oldPoolMap[p.poolId] = p));
-
-    for (const pool of newData.pools) {
-        const oldPool = oldPoolMap[pool.poolId];
-        if (!oldPool) {
-            changes.push(
-                `🆕 <b>New pool added:</b> Pool #${pool.poolId} (owner: <code>${pool.owner.slice(0, 10)}…</code>)`
-            );
-        } else if (oldPool.balanceWeightX18 !== pool.balanceWeightX18) {
-            changes.push(
-                `⚖️ <b>Pool #${pool.poolId} weight:</b> ${oldPool.balanceWeightX18} → ${pool.balanceWeightX18}`
-            );
-        }
-    }
-
-    // Check for removed pools
-    const newPoolIds = new Set(newData.pools.map((p) => p.poolId));
-    for (const pool of oldData.pools) {
-        if (!newPoolIds.has(pool.poolId)) {
-            changes.push(`🗑 <b>Pool removed:</b> Pool #${pool.poolId}`);
-        }
-    }
-
-    // Insurance change
-    const oldIns = parseFloat(oldData.insurance);
-    const newIns = parseFloat(newData.insurance);
-    const insDiff = newIns - oldIns;
-
-    if (Math.abs(insDiff) >= threshold) {
-        const sign = insDiff > 0 ? "+" : "";
-        changes.push(
-            `🛡 <b>Insurance:</b> ${telegram.fmt(oldData.insurance)} → ${telegram.fmt(newData.insurance)} (<code>${sign}${telegram.fmt(insDiff.toString())}</code>)`
-        );
-    }
-
-    return changes;
+    return null;
 }
 
 /**
@@ -119,21 +58,19 @@ function detectChanges(oldData, newData) {
  */
 async function tick() {
     try {
-        console.log(`\n⏱ [${new Date().toISOString()}] Fetching vault data...`);
-        const data = await contracts.getVaultData();
+        console.log(`\n⏱ [${new Date().toISOString()}] Checking pool #${config.targetPoolId} cap...`);
+        const data = await contracts.getPoolData();
 
-        console.log(`   TVL: ${data.tvl.totalBalance} ${data.tvl.symbol}`);
-        console.log(`   Pools: ${data.pools.length}`);
-        console.log(`   Insurance: ${data.insurance}`);
+        console.log(`   Pool #${data.targetPool.poolId} weight: ${data.targetPool.balanceWeightX18}`);
         console.log(`   Block: ${data.blockNumber}`);
 
         if (previousState) {
-            const changes = detectChanges(previousState, data);
-            if (changes.length > 0) {
-                console.log(`🔔 ${changes.length} change(s) detected!`);
-                await telegram.sendChangeNotification(changes, data);
+            const capChange = detectCapIncrease(previousState, data);
+            if (capChange) {
+                console.log(`🚨 CAP INCREASED! ${capChange.oldWeight} → ${capChange.newWeight}`);
+                await telegram.sendCapIncreaseNotification(capChange, data);
             } else {
-                console.log(`   No significant changes.`);
+                console.log(`   No cap change.`);
             }
         }
 
@@ -141,7 +78,6 @@ async function tick() {
         saveState(data);
     } catch (err) {
         console.error("❌ Error during monitoring tick:", err.message);
-        // Try to notify about the error
         try {
             await telegram.sendMessage(
                 `⚠️ <b>Nado Monitor Error</b>\n\n<code>${err.message}</code>`
@@ -157,18 +93,18 @@ async function tick() {
  */
 async function start() {
     loadState();
-    console.log("🔍 Running initial vault check...\n");
+    console.log(`🔍 Monitoring pool #${config.targetPoolId} for cap increases...\n`);
 
     // Initial data fetch
-    const data = await contracts.getVaultData();
+    const data = await contracts.getPoolData();
     previousState = data;
     saveState(data);
 
     // Send startup notification
     await telegram.sendStartupNotification(data);
 
-    console.log(`\n⏰ Monitoring every ${config.pollIntervalMs / 1000}s...`);
+    console.log(`\n⏰ Checking every ${config.pollIntervalMs / 1000}s...`);
     setInterval(tick, config.pollIntervalMs);
 }
 
-module.exports = { start, tick, detectChanges };
+module.exports = { start, tick, detectCapIncrease };
